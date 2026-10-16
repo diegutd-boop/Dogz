@@ -8,6 +8,65 @@ const PORT = process.env.PORT || 8080;
 const MAX_TEXT_BYTES = 10 * 1024 * 1024;
 const TIMEOUT_MS = 15000;
 
+// ---------- Password protection ----------
+// Set the PROXY_PASSWORD environment variable (Render -> Environment) to turn it on.
+const crypto = require('crypto');
+const PASSWORD = process.env.PROXY_PASSWORD || '';
+const TOKEN = PASSWORD ? crypto.createHmac('sha256', PASSWORD).update('dogz-session').digest('hex') : '';
+const fails = new Map(); // ip -> { n, t } failed login attempts
+
+function getCookie(req, name) {
+  const m = (req.headers.cookie || '').split(/;\s*/).find((c) => c.startsWith(name + '='));
+  return m ? m.slice(name.length + 1) : '';
+}
+function authed(req) {
+  if (!PASSWORD) return true;
+  const c = getCookie(req, 'dogz_auth');
+  return c.length === TOKEN.length && crypto.timingSafeEqual(Buffer.from(c), Buffer.from(TOKEN));
+}
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const safeNext = (n) => (typeof n === 'string' && n.startsWith('/') && !n.startsWith('//') ? n : '/');
+
+function loginPage(msg, next) {
+  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in</title>
+<style>body{font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;background:#1a0505;color:#fde8e8}
+form{width:min(92vw,360px);display:grid;gap:10px}input,button{padding:12px 14px;border-radius:10px;border:1px solid #4d1515;background:#2a0a0a;color:inherit;font-size:16px}
+button{background:#c81e1e;border:0;cursor:pointer}</style>
+<form method="post" action="/login"><h2>🐶 Dogz Proxy</h2>
+<input type="password" name="password" placeholder="Password" autofocus>
+<input type="hidden" name="next" value="${esc(next)}"><button>Enter</button><small>${esc(msg || '')}</small></form>`;
+}
+
+function handleLogin(req, res, u) {
+  const html = { 'content-type': 'text/html; charset=utf-8' };
+  const next = safeNext(u.searchParams.get('next'));
+  if (!PASSWORD) { res.writeHead(302, { location: '/' }); return res.end(); }
+  if (req.method !== 'POST') { res.writeHead(200, html); return res.end(loginPage('', next)); }
+
+  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  const f = fails.get(ip);
+  const recent = f && Date.now() - f.t < 15 * 60 * 1000;
+  if (recent && f.n >= 10) { res.writeHead(429, html); return res.end(loginPage('Too many tries. Wait 15 minutes.', next)); }
+
+  let body = '';
+  req.on('data', (c) => { body += c; if (body.length > 2048) req.destroy(); });
+  req.on('end', () => {
+    const p = new URLSearchParams(body);
+    const a = crypto.createHash('sha256').update(p.get('password') || '').digest();
+    const b = crypto.createHash('sha256').update(PASSWORD).digest();
+    const to = safeNext(p.get('next'));
+    if (!crypto.timingSafeEqual(a, b)) {
+      fails.set(ip, { n: (recent ? f.n : 0) + 1, t: Date.now() });
+      res.writeHead(401, html);
+      return res.end(loginPage('Wrong password.', to));
+    }
+    fails.delete(ip);
+    const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
+    res.writeHead(302, { location: to, 'set-cookie': `dogz_auth=${TOKEN}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000${secure}` });
+    res.end();
+  });
+}
+
 // ---------- SSRF protection: refuse private/internal addresses ----------
 function isPrivateIP(ip) {
   if (ip.startsWith('::ffff:')) ip = ip.slice(7);
@@ -150,6 +209,11 @@ function handleProxy(req, res, target) {
 
 http.createServer((req, res) => {
   const u = new URL(req.url, 'http://localhost');
+  if (u.pathname === '/login') return handleLogin(req, res, u);
+  if (!authed(req)) {
+    res.writeHead(302, { location: '/login?next=' + encodeURIComponent(req.url) });
+    return res.end();
+  }
   if (u.pathname === '/') {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     return res.end(HOME);
@@ -160,4 +224,7 @@ http.createServer((req, res) => {
     return handleProxy(req, res, target);
   }
   fail(res, 404, 'Not found');
-}).listen(PORT, () => console.log(`Web proxy running at http://localhost:${PORT}`));
+}).listen(PORT, () => {
+  console.log(`Web proxy running at http://localhost:${PORT}`);
+  if (!PASSWORD) console.log('WARNING: PROXY_PASSWORD is not set, so the proxy is open to everyone.');
+});
