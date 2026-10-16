@@ -1,5 +1,7 @@
 // Minimal browse-through-URL web proxy. No dependencies. Node 16+.
 // Run: node server.js   then open http://localhost:8080
+const fs = require('fs');
+const path = require('path');
 const http = require('http');
 const https = require('https');
 const dns = require('dns');
@@ -149,6 +151,10 @@ const HOME = `<!doctype html><meta charset="utf-8">
   <button>Go</button>
 </form></div>`;
 
+// The Dogz site (index.html next to this file) is the home page; falls back to the simple form.
+let INDEX = HOME;
+try { INDEX = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8'); } catch {}
+
 function fail(res, code, msg) {
   if (res.headersSent) return res.end();
   res.writeHead(code, { 'content-type': 'text/plain; charset=utf-8' });
@@ -216,7 +222,7 @@ http.createServer((req, res) => {
   }
   if (u.pathname === '/') {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    return res.end(HOME);
+    return res.end(INDEX);
   }
   if (u.pathname === '/proxy') {
     const target = normalize(u.searchParams.get('url'));
