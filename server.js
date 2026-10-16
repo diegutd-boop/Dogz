@@ -117,7 +117,7 @@ function proxify(ref, base) {
 function rewriteHTML(html, base) {
   html = html
     .replace(/<meta[^>]+http-equiv=["']?(content-security-policy|refresh)["']?[^>]*>/gi, '')
-    .replace(/\s(integrity|crossorigin|nonce)=("[^"]*"|'[^']*')/gi, '')
+    .replace(/\s(integrity|crossorigin|nonce)=(["'][^"]*["']|'[^']*')/gi, '')
     .replace(/(\s(?:href|src|action|poster|data-src)=)(["'])(.*?)\2/gi,
       (_, p, q, v) => `${p}${q}${proxify(v.replace(/&amp;/g, '&'), base).replace(/&/g, '&amp;')}${q}`)
     .replace(/(\ssrcset=)(["'])(.*?)\2/gi, (_, p, q, v) => {
@@ -161,6 +161,36 @@ function fail(res, code, msg) {
   res.end(msg);
 }
 
+function serveStaticFile(req, res, filePath) {
+  fs.stat(filePath, (err, stats) => {
+    if (err || !stats.isFile()) return fail(res, 404, 'Not found');
+    const ext = path.extname(filePath).toLowerCase();
+    const types = {
+      '.html': 'text/html; charset=utf-8',
+      '.js': 'application/javascript; charset=utf-8',
+      '.css': 'text/css; charset=utf-8',
+      '.json': 'application/json; charset=utf-8',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.svg': 'image/svg+xml',
+      '.webp': 'image/webp',
+      '.mp3': 'audio/mpeg',
+      '.ogg': 'audio/ogg',
+      '.m4a': 'audio/mp4',
+      '.wav': 'audio/wav',
+      '.ico': 'image/x-icon',
+      '.txt': 'text/plain; charset=utf-8',
+      '.map': 'application/json; charset=utf-8',
+      '.wasm': 'application/wasm'
+    };
+    const type = types[ext] || 'application/octet-stream';
+    res.writeHead(200, { 'content-type': type });
+    fs.createReadStream(filePath).pipe(res);
+  });
+}
+
 // ---------- Proxy handler ----------
 function handleProxy(req, res, target) {
   const lib = target.protocol === 'https:' ? https : http;
@@ -168,7 +198,7 @@ function handleProxy(req, res, target) {
     'user-agent': req.headers['user-agent'] || 'Mozilla/5.0',
     accept: req.headers.accept || '*/*',
     'accept-language': req.headers['accept-language'] || 'en',
-    'accept-encoding': 'identity', // keep bodies readable for rewriting
+    'accept-encoding': 'identity',
   };
   if (req.headers['content-type']) headers['content-type'] = req.headers['content-type'];
   if (req.headers['content-length']) headers['content-length'] = req.headers['content-length'];
@@ -223,6 +253,12 @@ http.createServer((req, res) => {
   if (u.pathname === '/') {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     return res.end(INDEX);
+  }
+  if (u.pathname.startsWith('/games/')) {
+    const safe = decodeURIComponent(u.pathname).replace(/^\/+/, '');
+    const filePath = path.join(__dirname, safe);
+    if (!filePath.startsWith(__dirname)) return fail(res, 403, 'Forbidden');
+    return serveStaticFile(req, res, filePath);
   }
   if (u.pathname === '/proxy') {
     const target = normalize(u.searchParams.get('url'));
