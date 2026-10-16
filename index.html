@@ -1,3 +1,30 @@
+<!-- Games pane - add this above the main <script> tag -->
+<div class="pane card" id="p-games"><button class="bk">← Menu</button>
+  <div style="margin-bottom:12px">
+    <b>🎮 Imported Games</b>
+    <p class="mut" style="margin-top:6px">Choose a game from the submodule or paste a path under /games/Unblocked-Games/</p>
+  </div>
+
+  <div class="row" style="gap:8px;align-items:center;margin-bottom:8px">
+    <select id="gameList" style="flex:1;min-width:0">
+      <option value="">— Select a game —</option>
+      <option value="/games/Unblocked-Games/asrieldreemurfight/index.html">Asriel Dreemur Fight</option>
+      <option value="/games/Unblocked-Games/undertale/index.html">Undertale</option>
+      <!-- add other known folders here as additional options if you want -->
+    </select>
+    <button id="openGame" class="p">Open</button>
+  </div>
+
+  <div style="margin-bottom:8px">
+    <input id="gamePath" type="text" placeholder="/games/Unblocked-Games/<folder>/index.html" style="width:100%;padding:9px;border-radius:10px;border:1px solid var(--bd);background:var(--bg);color:var(--tx)">
+  </div>
+
+  <div style="border:1px solid var(--bd);border-radius:12px;overflow:hidden">
+    <iframe id="gameFrame" title="Game" src="" style="width:100%;height:600px;border:0;display:block;background:#000"></iframe>
+  </div>
+
+  <p class="mut" style="margin-top:8px">If a game doesn't load, run <code>git submodule update --init --recursive</code> locally then redeploy.</p>
+</div>
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
